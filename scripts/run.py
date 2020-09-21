@@ -26,7 +26,7 @@ class MsgFormatter(L.Formatter):
 	
 	def formatTime(self, record, datefmt):
 		t           = record.created
-		timeFrac    = abs(t-long(t))
+		timeFrac    = abs(t-float(t))
 		timeStruct  = time.localtime(record.created)
 		timeString  = ""
 		timeString += time.strftime("%F %T", timeStruct)
@@ -84,7 +84,7 @@ class Train(Subcommand):
 		argp.add_argument("-l", "--loglevel",       default="info",             type=str,
 		    choices=cls.LOGLEVELS.keys(),
 		    help="Logging severity level.")
-		argp.add_argument("-s", "--seed",           default=0xe4223644e98b8e64, type=long,
+		argp.add_argument("-s", "--seed",           default=0xe4223644e98b8e64, type=float,
 		    help="Seed for PRNGs.")
 		argp.add_argument("--summary",     action="store_true",
 		    help="""Print a summary of the network.""")
@@ -196,8 +196,7 @@ def getArgParser(prog):
 	argp = Ap.ArgumentParser(prog        = prog,
 	                         usage       = None,
 	                         description = None,
-	                         epilog      = None,
-	                         version     = __version__)
+	                         epilog      = None)
 	subp = argp.add_subparsers()
 	argp.set_defaults(argp=argp)
 	argp.set_defaults(subp=subp)
@@ -205,13 +204,12 @@ def getArgParser(prog):
 	# Add global args to argp here?
 	# ...
 	
-	
 	# Add subcommands
-	for v in globals().itervalues():
-		if(isinstance(v, type)       and
-		   issubclass(v, Subcommand) and
-		   v != Subcommand):
-			v.addArgParser(subp)
+	for key in globals().keys():
+		if(isinstance(globals()[key], type)       and
+		   issubclass(globals()[key], Subcommand) and
+		   globals()[key] != Subcommand):
+			globals()[key].addArgParser(subp)
 	
 	# Return argument parser.
 	return argp

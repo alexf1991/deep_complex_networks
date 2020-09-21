@@ -5,7 +5,7 @@
 # Authors: Olexa Bilaniuk
 #
 # What this module includes by default:
-import bn, conv, dense, fft, init, norm, pool
+import complexnn.bn, complexnn.conv, complexnn.dense, complexnn.fft, complexnn.init, complexnn.norm, complexnn.pool
 
 from   .bn    import ComplexBatchNormalization as ComplexBN
 from   .conv  import (ComplexConv,

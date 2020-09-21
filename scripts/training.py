@@ -13,23 +13,27 @@ from   complexnn                             import ComplexBN,\
                                                     SpectralPooling1D,SpectralPooling2D
 from complexnn import GetImag, GetReal
 import h5py                                  as     H
-import keras
-from   keras.callbacks                       import Callback, ModelCheckpoint, LearningRateScheduler
-from   keras.datasets                        import cifar10, cifar100
-from   keras.initializers                    import Orthogonal
-from   keras.layers                          import Layer, AveragePooling2D, AveragePooling3D, add, Add, concatenate, Concatenate, Input, Flatten, Dense, Convolution2D, BatchNormalization, Activation, Reshape, ConvLSTM2D, Conv2D
-from   keras.models                          import Model, load_model, save_model
-from   keras.optimizers                      import SGD, Adam, RMSprop
-from   keras.preprocessing.image             import ImageDataGenerator
-from   keras.regularizers                    import l2
-from   keras.utils.np_utils                  import to_categorical
-import keras.backend                         as     K
-import keras.models                          as     KM
-from   kerosene.datasets                     import svhn2
+import tensorflow.keras
+from   tensorflow.keras.callbacks                       import Callback, ModelCheckpoint, LearningRateScheduler
+from   tensorflow.keras.datasets                        import cifar10, cifar100
+from   tensorflow.keras.initializers                    import Orthogonal
+from   tensorflow.keras.layers                          import Layer, AveragePooling2D, AveragePooling3D, add, Add, concatenate, Concatenate, Flatten, Dense, Convolution2D, BatchNormalization, Activation, Reshape, ConvLSTM2D, Conv2D
+from   tensorflow.keras.models                          import Model, load_model, save_model
+from   tensorflow.keras.optimizers                      import SGD, Adam, RMSprop
+from   tensorflow.keras.preprocessing.image             import ImageDataGenerator
+from   tensorflow.keras.regularizers                    import l2
+from   tensorflow.keras.utils                  import to_categorical
+import tensorflow.keras.backend                         as     K
+import tensorflow.keras.models                          as     KM
+try:
+    from   kerosene.datasets                     import svhn2
+except:
+    print("SVHN dataset not available")
 import logging                               as     L
 import numpy                                 as     np
 import os, pdb, socket, sys, time
-import theano                                as     T
+import tensorflow as tf
+#import theano                                as     T
 
 
 #
@@ -41,7 +45,7 @@ def learnConcatRealImagBlock(I, filter_size, featmaps, stage, block, convArgs, b
 	
 	conv_name_base = 'res'+str(stage)+block+'_branch'
 	bn_name_base   = 'bn' +str(stage)+block+'_branch'
-	
+
 	O = BatchNormalization(name=bn_name_base+'2a', **bnArgs)(I)
 	O = Activation(d.act)(O)
 	O = Convolution2D(featmaps[0], filter_size,
@@ -70,10 +74,10 @@ def getResidualBlock(I, filter_size, featmaps, stage, block, shortcut, convArgs,
 	nb_fmaps1, nb_fmaps2 = featmaps
 	conv_name_base       = 'res'+str(stage)+block+'_branch'
 	bn_name_base         = 'bn' +str(stage)+block+'_branch'
-	if K.image_data_format() == 'channels_first' and K.ndim(I) != 3:
-		channel_axis = 1
-	else:
-		channel_axis = -1
+	#if K.image_data_format() == 'channels_first' and K.ndim(I) != 3:
+	#	channel_axis = 1
+	#else:
+	channel_axis = -1
 	
 	
 	if   d.model == "real":
@@ -94,7 +98,6 @@ def getResidualBlock(I, filter_size, featmaps, stage, block, shortcut, convArgs,
 			O = Conv2D(nb_fmaps1, filter_size, name=conv_name_base+'2a', strides=(2, 2), **convArgs)(O)
 		elif d.model == "complex":
 			O = ComplexConv2D(nb_fmaps1, filter_size, name=conv_name_base+'2a', strides=(2, 2), **convArgs)(O)
-	
 	if   d.model == "real":
 		O = BatchNormalization(name=bn_name_base+'_2b', **bnArgs)(O)
 		O = Activation(activation)(O)
@@ -122,11 +125,11 @@ def getResidualBlock(I, filter_size, featmaps, stage, block, shortcut, convArgs,
 			                  strides = (2, 2) if d.spectral_pool_scheme != "nodownsample" else
 			                            (1, 1),
 			                  **convArgs)(I)
+
+			O_real = Concatenate(channel_axis)([X[...,:X.shape[-1]//2],O[...,:O.shape[-1]//2]])
+			O_imag = Concatenate(channel_axis)([X[...,X.shape[-1]//2:],O[...,O.shape[-1]//2:]])
+			O      = Concatenate(channel_axis)([O_real,     O_imag])
 			
-			O_real = Concatenate(channel_axis)([GetReal()(X), GetReal()(O)])
-			O_imag = Concatenate(channel_axis)([GetImag()(X), GetImag()(O)])
-			O      = Concatenate(      1     )([O_real,     O_imag])
-	
 	return O
 
 def applySpectralPooling(x, d):
@@ -150,8 +153,8 @@ def getResnetModel(d):
 	activation    = d.act
 	advanced_act  = d.aact
 	drop_prob     = d.dropout
-	inputShape    = (3, 32, 32) if K.image_dim_ordering() == "th" else (32, 32, 3)
-	channelAxis   = 1 if K.image_data_format() == 'channels_first' else -1
+	inputShape    = (32, 32, 3)#(3, 32, 32) if K.image_dim_ordering() == "th" else (32, 32, 3)
+	channelAxis   = -1#1 if K.image_data_format() == 'channels_first' else -1
 	filsize       = (3, 3)
 	convArgs      = {
 		"padding":                  "same",
@@ -171,18 +174,19 @@ def getResnetModel(d):
 		convArgs.update({"spectral_parametrization": d.spectral_param,
 						 "kernel_initializer": d.comp_init})
 	
-	
+
 	#
 	# Input Layer
 	#
-	
-	I = Input(shape=inputShape)
+
+	I = tf.keras.Input(shape=inputShape)
 	
 	#
 	# Stage 1
 	#
 	
 	O = learnConcatRealImagBlock(I, (1, 1), (3, 3), 0, '0', convArgs, bnArgs, d)
+	
 	O = Concatenate(channelAxis)([I, O])
 	if d.model == "real":
 		O = Conv2D(sf, filsize, name='conv1', **convArgs)(O)
@@ -196,7 +200,7 @@ def getResnetModel(d):
 	# Stage 2
 	#
 	
-	for i in xrange(n):
+	for i in range(n):
 		O = getResidualBlock(O, filsize, [sf, sf], 2, str(i), 'regular', convArgs, bnArgs, d)
 		if i == n//2 and d.spectral_pool_scheme == "stagemiddle":
 			O = applySpectralPooling(O, d)
@@ -204,12 +208,11 @@ def getResnetModel(d):
 	#
 	# Stage 3
 	#
-	
 	O = getResidualBlock(O, filsize, [sf, sf], 3, '0', 'projection', convArgs, bnArgs, d)
 	if d.spectral_pool_scheme == "nodownsample":
 		O = applySpectralPooling(O, d)
 	
-	for i in xrange(n-1):
+	for i in range(n-1):
 		O = getResidualBlock(O, filsize, [sf*2, sf*2], 3, str(i+1), 'regular', convArgs, bnArgs, d)
 		if i == n//2 and d.spectral_pool_scheme == "stagemiddle":
 			O = applySpectralPooling(O, d)
@@ -222,7 +225,7 @@ def getResnetModel(d):
 	if d.spectral_pool_scheme == "nodownsample":
 		O = applySpectralPooling(O, d)
 	
-	for i in xrange(n-1):
+	for i in range(n-1):
 		O = getResidualBlock(O, filsize, [sf*4, sf*4], 4, str(i+1), 'regular', convArgs, bnArgs, d)
 		if i == n//2 and d.spectral_pool_scheme == "stagemiddle":
 			O = applySpectralPooling(O, d)
@@ -490,8 +493,8 @@ def train(d):
 	summary += summarizeEnvvar("THEANO_FLAGS")+"\n"
 	summary += "\n"
 	summary += "Software Versions:\n"
-	summary += "Theano:                  "+T.__version__+"\n"
-	summary += "Keras:                   "+keras.__version__+"\n"
+	#summary += "Theano:                  "+T.__version__+"\n"
+	summary += "tensorflow:                   "+tf.__version__+"\n"
 	summary += "\n"
 	summary += "Arguments:\n"
 	summary += "Path to Datasets:        "+str(d.datadir)+"\n"
@@ -639,20 +642,20 @@ def train(d):
 	L.getLogger("entry").info("# of Parameters:              {:10d}".format(model.count_params()))
 	L.getLogger("entry").info("Compiling Train   Function...")
 	t =- time.time()
-	model._make_train_function()
-	t += time.time()
-	L.getLogger("entry").info("                              {:10.3f}s".format(t))
-	L.getLogger("entry").info("Compiling Predict Function...")
-	t =- time.time()
-	model._make_predict_function()
-	t += time.time()
-	L.getLogger("entry").info("                              {:10.3f}s".format(t))
-	L.getLogger("entry").info("Compiling Test    Function...")
-	t =- time.time()
-	model._make_test_function()
-	t += time.time()
-	L.getLogger("entry").info("                              {:10.3f}s".format(t))
-	L.getLogger("entry").info("Compilation Ended.")
+	#model._make_train_function()
+	#t += time.time()
+	#L.getLogger("entry").info("                              {:10.3f}s".format(t))
+	#L.getLogger("entry").info("Compiling Predict Function...")
+	#t =- time.time()
+	#model._make_predict_function()
+	#t += time.time()
+	#L.getLogger("entry").info("                              {:10.3f}s".format(t))
+	#L.getLogger("entry").info("Compiling Test    Function...")
+	#t =- time.time()
+	#model._make_test_function()
+	#t += time.time()
+	#L.getLogger("entry").info("                              {:10.3f}s".format(t))
+	#L.getLogger("entry").info("Compilation Ended.")
 	
 	#
 	# Create Callbacks

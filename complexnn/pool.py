@@ -5,14 +5,14 @@
 # Authors: Olexa Bilaniuk
 #
 
-import keras.backend                        as KB
-import keras.engine                         as KE
-import keras.layers                         as KL
-import keras.optimizers                     as KO
-import theano                               as T
-import theano.ifelse                        as TI
-import theano.tensor                        as TT
-import theano.tensor.fft                    as TTF
+import tensorflow.keras.backend                        as KB
+#import tensorflow.keras.engine                         as KE
+import tensorflow.keras.layers                         as KL
+import tensorflow.keras.optimizers                     as KO
+#import theano                               as T
+#import theano.ifelse                        as TI
+#import theano.tensor                        as TT
+#import theano.tensor.fft                    as TTF
 import numpy                                as np
 
 
@@ -131,7 +131,7 @@ if __name__ == "__main__":
 	p = SP.SpectralPooling2D(gamma=[0.15,0.15])(f)
 	o = CF.IFFT2()(p)
 	
-	model = KE.Model([i], [f,p,o])
+	model = tf.keras.Model([i], [f,p,o])
 	model.compile("sgd", "mse")
 	
 	# Use it

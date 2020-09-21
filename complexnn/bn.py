@@ -10,13 +10,13 @@
 #       https://github.com/fchollet/keras/blob/master/keras/layers/normalization.py
 
 import numpy as np
-from keras.layers import Layer, InputSpec
-from keras import initializers, regularizers, constraints
-import keras.backend as K
-
+from tensorflow.keras.layers import Layer, InputSpec
+from tensorflow.keras import initializers, regularizers, constraints
+import tensorflow.keras.backend as K
+import tensorflow as tf
 
 def sqrt_init(shape, dtype=None):
-    value = (1 / K.sqrt(2)) * K.ones(shape)
+    value = (1 / tf.sqrt(2.0)) * tf.ones(shape)
     return value
 
 
@@ -37,11 +37,11 @@ def complex_standardization(input_centred, Vrr, Vii, Vri,
                             layernorm=False, axis=-1):
     
     ndim = K.ndim(input_centred)
-    input_dim = K.shape(input_centred)[axis] // 2
+    input_dim = tf.shape(input_centred)[axis] // 2
     variances_broadcast = [1] * ndim
     variances_broadcast[axis] = input_dim
     if layernorm:
-        variances_broadcast[0] = K.shape(input_centred)[0]
+        variances_broadcast[0] = tf.shape(input_centred)[0]
 
     # We require the covariance matrix's inverse square root. That first requires
     # square rooting, followed by inversion (I do this in that order because during
@@ -53,8 +53,8 @@ def complex_standardization(input_centred, Vrr, Vii, Vri,
     # delta = (Vrr * Vii) - (Vri ** 2) = Determinant. Guaranteed >= 0 because SPD
     delta = (Vrr * Vii) - (Vri ** 2)
 
-    s = np.sqrt(delta) # Determinant of square root matrix
-    t = np.sqrt(tau + 2 * s)
+    s = tf.sqrt(delta) # Determinant of square root matrix
+    t = tf.sqrt(tau + 2 * s)
 
     # The square root matrix could now be explicitly formed as
     #       [ Vrr+s Vri   ]
@@ -85,12 +85,12 @@ def complex_standardization(input_centred, Vrr, Vii, Vri,
     # x_real_normed = Wrr * x_real_centred + Wri * x_imag_centred
     # x_imag_normed = Wri * x_real_centred + Wii * x_imag_centred
 
-    broadcast_Wrr = K.reshape(Wrr, variances_broadcast)
-    broadcast_Wri = K.reshape(Wri, variances_broadcast)
-    broadcast_Wii = K.reshape(Wii, variances_broadcast)
+    broadcast_Wrr = tf.reshape(Wrr, variances_broadcast)
+    broadcast_Wri = tf.reshape(Wri, variances_broadcast)
+    broadcast_Wii = tf.reshape(Wii, variances_broadcast)
 
-    cat_W_4_real = K.concatenate([broadcast_Wrr, broadcast_Wii], axis=axis)
-    cat_W_4_imag = K.concatenate([broadcast_Wri, broadcast_Wri], axis=axis)
+    cat_W_4_real = tf.concat([broadcast_Wrr, broadcast_Wii], axis=axis)
+    cat_W_4_imag = tf.concat([broadcast_Wri, broadcast_Wri], axis=axis)
 
     if (axis == 1 and ndim != 3) or ndim == 2:
         centred_real = input_centred[:, :input_dim]
@@ -109,7 +109,7 @@ def complex_standardization(input_centred, Vrr, Vii, Vri,
             'Incorrect Batchnorm combination of axis and dimensions. axis should be either 1 or -1. '
             'axis: ' + str(self.axis) + '; ndim: ' + str(ndim) + '.'
         )
-    rolled_input = K.concatenate([centred_imag, centred_real], axis=axis)
+    rolled_input = tf.concat([centred_imag, centred_real], axis=axis)
 
     output = cat_W_4_real * input_centred + cat_W_4_imag * rolled_input
 
@@ -126,7 +126,7 @@ def ComplexBN(input_centred, Vrr, Vii, Vri, beta,
                center=True, layernorm=False, axis=-1):
 
     ndim = K.ndim(input_centred)
-    input_dim = K.shape(input_centred)[axis] // 2
+    input_dim = tf.shape(input_centred)[axis] // 2
     if scale:
         gamma_broadcast_shape = [1] * ndim
         gamma_broadcast_shape[axis] = input_dim
@@ -151,12 +151,12 @@ def ComplexBN(input_centred, Vrr, Vii, Vri, beta,
         # x_real_BN = gamma_rr * x_real_normed + gamma_ri * x_imag_normed + beta_real
         # x_imag_BN = gamma_ri * x_real_normed + gamma_ii * x_imag_normed + beta_imag
         
-        broadcast_gamma_rr = K.reshape(gamma_rr, gamma_broadcast_shape)
-        broadcast_gamma_ri = K.reshape(gamma_ri, gamma_broadcast_shape)
-        broadcast_gamma_ii = K.reshape(gamma_ii, gamma_broadcast_shape)
+        broadcast_gamma_rr = tf.reshape(gamma_rr, gamma_broadcast_shape)
+        broadcast_gamma_ri = tf.reshape(gamma_ri, gamma_broadcast_shape)
+        broadcast_gamma_ii = tf.reshape(gamma_ii, gamma_broadcast_shape)
 
-        cat_gamma_4_real = K.concatenate([broadcast_gamma_rr, broadcast_gamma_ii], axis=axis)
-        cat_gamma_4_imag = K.concatenate([broadcast_gamma_ri, broadcast_gamma_ri], axis=axis)
+        cat_gamma_4_real = tf.concat([broadcast_gamma_rr, broadcast_gamma_ii], axis=axis)
+        cat_gamma_4_imag = tf.concat([broadcast_gamma_ri, broadcast_gamma_ri], axis=axis)
         if (axis == 1 and ndim != 3) or ndim == 2:
             centred_real = standardized_output[:, :input_dim]
             centred_imag = standardized_output[:, input_dim:]
@@ -174,15 +174,15 @@ def ComplexBN(input_centred, Vrr, Vii, Vri, beta,
                 'Incorrect Batchnorm combination of axis and dimensions. axis should be either 1 or -1. '
                 'axis: ' + str(self.axis) + '; ndim: ' + str(ndim) + '.'
             )
-        rolled_standardized_output = K.concatenate([centred_imag, centred_real], axis=axis)
+        rolled_standardized_output = tf.concat([centred_imag, centred_real], axis=axis)
         if center:
-            broadcast_beta = K.reshape(beta, broadcast_beta_shape)
+            broadcast_beta = tf.reshape(beta, broadcast_beta_shape)
             return cat_gamma_4_real * standardized_output + cat_gamma_4_imag * rolled_standardized_output + broadcast_beta
         else:
             return cat_gamma_4_real * standardized_output + cat_gamma_4_imag * rolled_standardized_output
     else:
         if center:
-            broadcast_beta = K.reshape(beta, broadcast_beta_shape)
+            broadcast_beta = tf.reshape(beta, broadcast_beta_shape)
             return input_centred + broadcast_beta
         else:
             return input_centred
@@ -345,10 +345,10 @@ class ComplexBatchNormalization(Layer):
         reduction_axes = list(range(ndim))
         del reduction_axes[self.axis]
         input_dim = input_shape[self.axis] // 2
-        mu = K.mean(inputs, axis=reduction_axes)
+        mu = tf.reduce_mean(inputs, axis=reduction_axes)
         broadcast_mu_shape = [1] * len(input_shape)
         broadcast_mu_shape[self.axis] = input_shape[self.axis]
-        broadcast_mu = K.reshape(mu, broadcast_mu_shape)
+        broadcast_mu = tf.reshape(mu, broadcast_mu_shape)
         if self.center:
             input_centred = inputs - broadcast_mu
         else:
@@ -380,16 +380,16 @@ class ComplexBatchNormalization(Layer):
                 'axis: ' + str(self.axis) + '; ndim: ' + str(ndim) + '.'
             )
         if self.scale:
-            Vrr = K.mean(
+            Vrr = tf.reduce_mean(
                 centred_squared_real,
                 axis=reduction_axes
             ) + self.epsilon
-            Vii = K.mean(
+            Vii = tf.reduce_mean(
                 centred_squared_imag,
                 axis=reduction_axes
             ) + self.epsilon
             # Vri contains the real and imaginary covariance for each feature map.
-            Vri = K.mean(
+            Vri = tf.reduce_mean(
                 centred_real * centred_imag,
                 axis=reduction_axes,
             )
@@ -420,7 +420,7 @@ class ComplexBatchNormalization(Layer):
 
             def normalize_inference():
                 if self.center:
-                    inference_centred = inputs - K.reshape(self.moving_mean, broadcast_mu_shape)
+                    inference_centred = inputs - tf.reshape(self.moving_mean, broadcast_mu_shape)
                 else:
                     inference_centred = inputs
                 return ComplexBN(

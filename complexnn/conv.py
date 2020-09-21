@@ -4,21 +4,20 @@
 #
 # Authors: Chiheb Trabelsi
 
-from keras import backend as K
-from keras import activations, initializers, regularizers, constraints
-from keras.layers import Lambda, Layer, InputSpec, Convolution1D, Convolution2D, add, multiply, Activation, Input, concatenate
-from keras.layers.convolutional import _Conv
-from keras.layers.merge import _Merge
-from keras.layers.recurrent import Recurrent
-from keras.utils import conv_utils
-from keras.models import Model
+from tensorflow.keras import backend as K
+from tensorflow.keras import activations, initializers, regularizers, constraints
+from tensorflow.keras.layers import Lambda, Layer, InputSpec, Convolution1D, Convolution2D, add, multiply, Activation, Input, concatenate
+#from tensorflow.keras.layers.convolutional import _Conv
+#from tensorflow.keras.layers.merge import _Merge
+#from tensorflow.keras.layers.recurrent import Recurrent
+#from tensorflow.keras.utils import conv_utils
+from tensorflow.keras.models import Model
 import numpy as np
-from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
-from .fft import fft, ifft, fft2, ifft2
 from .bn import ComplexBN as complex_normalization
 from .bn import sqrt_init
 from .init import ComplexInit, ComplexIndependentFilters
 from .norm import LayerNormalization, ComplexLayerNorm
+import tensorflow as tf
 
 
 
@@ -142,11 +141,11 @@ class ComplexConv(Layer):
         super(ComplexConv, self).__init__(**kwargs)
         self.rank = rank
         self.filters = filters
-        self.kernel_size = conv_utils.normalize_tuple(kernel_size, rank, 'kernel_size')
-        self.strides = conv_utils.normalize_tuple(strides, rank, 'strides')
-        self.padding = conv_utils.normalize_padding(padding)
-        self.data_format = 'channels_last' if rank == 1 else conv_utils.normalize_data_format(data_format)
-        self.dilation_rate = conv_utils.normalize_tuple(dilation_rate, rank, 'dilation_rate')
+        self.kernel_size = kernel_size#conv_utils.normalize_tuple(kernel_size, rank, 'kernel_size')
+        self.strides = strides#conv_utils.normalize_tuple(strides, rank, 'strides')
+        self.padding = padding#conv_utils.normalize_padding(padding)
+        self.data_format = 'channels_last' #if rank == 1 else conv_utils.normalize_data_format(data_format)
+        self.dilation_rate = dilation_rate#conv_utils.normalize_tuple(dilation_rate, rank, 'dilation_rate')
         self.activation = activations.get(activation)
         self.use_bias = use_bias
         self.normalize_weight = normalize_weight
@@ -170,10 +169,10 @@ class ComplexConv(Layer):
             self.seed = np.random.randint(1, 10e6)
         else:
             self.seed = seed
-        self.input_spec = InputSpec(ndim=self.rank + 2)
+        #self.input_spec = InputSpec(ndim=self.rank + 2)
 
     def build(self, input_shape):
-
+        
         if self.data_format == 'channels_first':
             channel_axis = 1
         else:
@@ -183,6 +182,8 @@ class ComplexConv(Layer):
                              'should be defined. Found `None`.')
         input_dim = input_shape[channel_axis] // 2
         self.kernel_shape = self.kernel_size + (input_dim , self.filters)
+
+        self.kernel_shape_real = self.kernel_size + (input_dim , 2*self.filters)
         # The kernel shape here is a complex kernel shape:
         #   nb of complex feature maps = input_dim;
         #   nb of output complex feature maps = self.filters;
@@ -203,7 +204,7 @@ class ComplexConv(Layer):
             kern_init = self.kernel_initializer
         
         self.kernel = self.add_weight(
-            self.kernel_shape,
+            shape=self.kernel_shape_real,
             initializer=kern_init,
             name='kernel',
             regularizer=self.kernel_regularizer,
@@ -241,7 +242,7 @@ class ComplexConv(Layer):
         if self.use_bias:
             bias_shape = (2 * self.filters,)
             self.bias = self.add_weight(
-                bias_shape,
+                shape=bias_shape,
                 initializer=self.bias_initializer,
                 name='bias',
                 regularizer=self.bias_regularizer,
@@ -252,13 +253,13 @@ class ComplexConv(Layer):
             self.bias = None
 
         # Set input spec.
-        self.input_spec = InputSpec(ndim=self.rank + 2,
-                                    axes={channel_axis: input_dim * 2})
+        #self.input_spec = InputSpec(ndim=self.rank + 2,
+        #                            axes={channel_axis: input_dim * 2})
         self.built = True
 
-    def call(self, inputs):
+    def call(self, inputs,training=False):
         channel_axis = 1 if self.data_format == 'channels_first' else -1
-        input_dim    = K.shape(inputs)[channel_axis] // 2
+        input_dim    = tf.shape(inputs)[channel_axis] // 2
         if self.rank == 1:
             f_real   = self.kernel[:, :, :self.filters]
             f_imag   = self.kernel[:, :, self.filters:]
@@ -269,68 +270,74 @@ class ComplexConv(Layer):
             f_real   = self.kernel[:, :, :, :, :self.filters]
             f_imag   = self.kernel[:, :, :, :, self.filters:]
 
+        if self.data_format == "channels_last":
+            self.data_format = "NHWC"
+        elif self.data_format == "channels_first":
+            self.data_format = "NCHW"
+
         convArgs = {"strides":       self.strides[0]       if self.rank == 1 else self.strides,
-                    "padding":       self.padding,
+                    "padding":       self.padding.upper(),
                     "data_format":   self.data_format,
-                    "dilation_rate": self.dilation_rate[0] if self.rank == 1 else self.dilation_rate}
-        convFunc = {1: K.conv1d,
-                    2: K.conv2d,
-                    3: K.conv3d}[self.rank]
+                    "dilations": self.dilation_rate[0] if self.rank == 1 else self.dilation_rate}
+        convFunc = {1: tf.nn.conv1d,
+                    2: tf.nn.conv2d,
+                    3: tf.nn.conv3d}[self.rank]
 
         # processing if the weights are assumed to be represented in the spectral domain
 
         if self.spectral_parametrization:
             if   self.rank == 1:
-                f_real = K.permute_dimensions(f_real, (2,1,0))
-                f_imag = K.permute_dimensions(f_imag, (2,1,0))
-                f      = K.concatenate([f_real, f_imag], axis=0)
-                fshape = K.shape(f)
-                f      = K.reshape(f, (fshape[0] * fshape[1], fshape[2]))
-                f      = ifft(f)
-                f      = K.reshape(f, fshape)
-                f_real = f[:fshape[0]//2]
-                f_imag = f[fshape[0]//2:]
-                f_real = K.permute_dimensions(f_real, (2,1,0))
-                f_imag = K.permute_dimensions(f_imag, (2,1,0))
+                f_real = tf.transpose(f_real, perm=(2,1,0))
+                f_imag = tf.transpose(f_imag, perm=(2,1,0))
+                f      = tf.complex(f_real,f_imag)#tf.concat([f_real, f_imag], axis=0)
+                fshape = tf.shape(f)
+                f      = tf.reshape(f, (fshape[0] * fshape[1], fshape[2]))
+                f      = tf.signal.ifft(f)
+                f      = tf.reshape(f, fshape)
+                f_real = tf.math.real(f)#f[:fshape[0]//2]
+                f_imag = tf.math.imag(f)#f[fshape[0]//2:]
+                f_real = tf.transpose(f_real, perm=(2,1,0))
+                f_imag = tf.transpose(f_imag,perm=(2,1,0))
             elif self.rank == 2:
-                f_real = K.permute_dimensions(f_real, (3,2,0,1))
-                f_imag = K.permute_dimensions(f_imag, (3,2,0,1))
-                f      = K.concatenate([f_real, f_imag], axis=0)
-                fshape = K.shape(f)
-                f      = K.reshape(f, (fshape[0] * fshape[1], fshape[2], fshape[3]))
-                f      = ifft2(f)
-                f      = K.reshape(f, fshape)
-                f_real = f[:fshape[0]//2]
-                f_imag = f[fshape[0]//2:]
-                f_real = K.permute_dimensions(f_real, (2,3,1,0))
-                f_imag = K.permute_dimensions(f_imag, (2,3,1,0))
+                f_real = tf.transpose(f_real, perm=(3,2,0,1))
+                f_imag = tf.transpose(f_imag, perm=(3,2,0,1))
+                f      = tf.complex(f_real,f_imag)#tf.concat([f_real, f_imag], axis=0)
+                fshape = tf.shape(f)
+                f      = tf.reshape(f, (fshape[0] * fshape[1], fshape[2], fshape[3]))
+                f      = tf.signal.ifft2d(f)
+                f      = tf.reshape(f, fshape)
+                f_real = tf.math.real(f)#f[:fshape[0]//2]
+                f_imag = tf.math.imag(f)#f[fshape[0]//2:]
+                f_real = tf.transpose(f_real, perm=(2,3,1,0))
+                f_imag = tf.transpose(f_imag, perm=(2,3,1,0))
 
         # In case of weight normalization, real and imaginary weights are normalized
 
         if self.normalize_weight:
             ker_shape = self.kernel_shape
             nb_kernels = ker_shape[-2] * ker_shape[-1]
+
             kernel_shape_4_norm = (np.prod(self.kernel_size), nb_kernels)
-            reshaped_f_real = K.reshape(f_real, kernel_shape_4_norm)
-            reshaped_f_imag = K.reshape(f_imag, kernel_shape_4_norm)
+            reshaped_f_real = tf.reshape(f_real, kernel_shape_4_norm)
+            reshaped_f_imag = tf.reshape(f_imag, kernel_shape_4_norm)
             reduction_axes = list(range(2))
             del reduction_axes[-1]
-            mu_real = K.mean(reshaped_f_real, axis=reduction_axes)
-            mu_imag = K.mean(reshaped_f_imag, axis=reduction_axes)
+            mu_real = tf.reduce_mean(reshaped_f_real, axis=reduction_axes)
+            mu_imag = tf.reduce_mean(reshaped_f_imag, axis=reduction_axes)
 
             broadcast_mu_shape = [1] * 2
             broadcast_mu_shape[-1] = nb_kernels
-            broadcast_mu_real = K.reshape(mu_real, broadcast_mu_shape)
-            broadcast_mu_imag = K.reshape(mu_imag, broadcast_mu_shape)
+            broadcast_mu_real = tf.reshape(mu_real, broadcast_mu_shape)
+            broadcast_mu_imag = tf.reshape(mu_imag, broadcast_mu_shape)
             reshaped_f_real_centred = reshaped_f_real - broadcast_mu_real
             reshaped_f_imag_centred = reshaped_f_imag - broadcast_mu_imag
-            Vrr = K.mean(reshaped_f_real_centred ** 2, axis=reduction_axes) + self.epsilon
-            Vii = K.mean(reshaped_f_imag_centred ** 2, axis=reduction_axes) + self.epsilon
-            Vri = K.mean(reshaped_f_real_centred * reshaped_f_imag_centred,
+            Vrr = tf.reduce_mean(reshaped_f_real_centred ** 2, axis=reduction_axes) + self.epsilon
+            Vii = tf.reduce_mean(reshaped_f_imag_centred ** 2, axis=reduction_axes) + self.epsilon
+            Vri = tf.reduce_mean(reshaped_f_real_centred * reshaped_f_imag_centred,
                          axis=reduction_axes) + self.epsilon
             
             normalized_weight = complex_normalization(
-                K.concatenate([reshaped_f_real, reshaped_f_imag], axis=-1),
+                tf.concat([reshaped_f_real, reshaped_f_imag], axis=-1),
                 Vrr, Vii, Vri,
                 beta = None,
                 gamma_rr = self.gamma_rr,
@@ -343,23 +350,23 @@ class ComplexConv(Layer):
 
             normalized_real = normalized_weight[:, :nb_kernels]
             normalized_imag = normalized_weight[:, nb_kernels:]
-            f_real = K.reshape(normalized_real, self.kernel_shape)
-            f_imag = K.reshape(normalized_imag, self.kernel_shape)
+            f_real = tf.reshape(normalized_real, self.kernel_shape)
+            f_imag = tf.reshape(normalized_imag, self.kernel_shape)
 
         # Performing complex convolution
 
         f_real._keras_shape = self.kernel_shape
         f_imag._keras_shape = self.kernel_shape
 
-        cat_kernels_4_real = K.concatenate([f_real, -f_imag], axis=-2)
-        cat_kernels_4_imag = K.concatenate([f_imag,  f_real], axis=-2)
-        cat_kernels_4_complex = K.concatenate([cat_kernels_4_real, cat_kernels_4_imag], axis=-1)
-        cat_kernels_4_complex._keras_shape = self.kernel_size + (2 * input_dim, 2 * self.filters)
+        cat_kernels_4_real = tf.concat([f_real, -f_imag], axis=-2)
+        cat_kernels_4_imag = tf.concat([f_imag,  f_real], axis=-2)
+        cat_kernels_4_complex = tf.concat([cat_kernels_4_real, cat_kernels_4_imag], axis=-1)
+        #cat_kernels_4_complex._keras_shape = self.kernel_size + (2 * input_dim, 2 * self.filters)
 
         output = convFunc(inputs, cat_kernels_4_complex, **convArgs)
 
         if self.use_bias:
-            output = K.bias_add(
+            output = tf.nn.bias_add(
                 output,
                 self.bias,
                 data_format=self.data_format
@@ -370,32 +377,32 @@ class ComplexConv(Layer):
 
         return output
 
-    def compute_output_shape(self, input_shape):
-        if self.data_format == 'channels_last':
-            space = input_shape[1:-1]
-            new_space = []
-            for i in range(len(space)):
-                new_dim = conv_utils.conv_output_length(
-                    space[i],
-                    self.kernel_size[i],
-                    padding=self.padding,
-                    stride=self.strides[i],
-                    dilation=self.dilation_rate[i]
-                )
-                new_space.append(new_dim)
-            return (input_shape[0],) + tuple(new_space) + (2 * self.filters,)
-        if self.data_format == 'channels_first':
-            space = input_shape[2:]
-            new_space = []
-            for i in range(len(space)):
-                new_dim = conv_utils.conv_output_length(
-                    space[i],
-                    self.kernel_size[i],
-                    padding=self.padding,
-                    stride=self.strides[i],
-                    dilation=self.dilation_rate[i])
-                new_space.append(new_dim)
-            return (input_shape[0],) + (2 * self.filters,) + tuple(new_space)
+    #def compute_output_shape(self, input_shape):
+        #if self.data_format == 'channels_last':
+            #space = input_shape[1:-1]
+            #new_space = []
+            #for i in range(len(space)):
+                #new_dim = conv_utils.conv_output_length(
+                    #space[i],
+                    #self.kernel_size[i],
+                    #padding=self.padding,
+                    #stride=self.strides[i],
+                    #dilation=self.dilation_rate[i]
+                #)
+                #new_space.append(new_dim)
+            #return (input_shape[0],) + tuple(new_space) + (2 * self.filters,)
+        #if self.data_format == 'channels_first':
+            #space = input_shape[2:]
+            #new_space = []
+            #for i in range(len(space)):
+                #new_dim = conv_utils.conv_output_length(
+                    #space[i],
+                    #self.kernel_size[i],
+                    #padding=self.padding,
+                    #stride=self.strides[i],
+                    #dilation=self.dilation_rate[i])
+                #new_space.append(new_dim)
+            #return (input_shape[0],) + (2 * self.filters,) + tuple(new_space)
 
     def get_config(self):
         config = {
@@ -818,7 +825,7 @@ class ComplexConv3D(ComplexConv):
         return config
 
 
-class WeightNorm_Conv(_Conv):
+class WeightNorm_Conv(tf.keras.layers.Layer):
 	# Real-valued Convolutional Layer that normalizes its weights
 	# before convolving the input.
 	# The weight Normalization performed the one
@@ -908,8 +915,6 @@ class WeightNorm_Conv(_Conv):
         }
         base_config = super(WeightNorm_Conv, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
-
-
 
 # Aliases
 

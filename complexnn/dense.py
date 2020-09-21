@@ -5,13 +5,12 @@
 # Authors: Chiheb Trabelsi
 #
 
-from keras import backend as K
+from tensorflow.keras import backend as K
 import sys; sys.path.append('.')
-from keras import backend as K
-from keras import activations, initializers, regularizers, constraints
-from keras.layers import Layer, InputSpec
+from tensorflow.keras import backend as K
+from tensorflow.keras import activations, initializers, regularizers, constraints
+from tensorflow.keras.layers import Layer, InputSpec
 import numpy as np
-from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
 
 
 class ComplexDense(Layer):
