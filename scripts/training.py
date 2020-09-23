@@ -339,11 +339,8 @@ class TestErrorCallback(Callback):
 		self.loss_history.append(test_loss)
 		self.acc_history.append(test_acc)
 		
-		L.getLogger("train").info("Epoch {:5d} train_loss: {}, train_acc: {}, val_loss: {}, val_acc: {}, test_loss: {}, test_acc: {}".format(
-		                          epoch+1,
-		                          logs["loss"],     logs["acc"],
-		                          logs["val_loss"], logs["val_acc"],
-		                          test_loss,        test_acc))
+		L.getLogger("train").info("Epoch {:5d}, test_loss: {}, test_acc: {}".format(
+		                          epoch+1,test_loss,test_acc))
 
 #
 # Keep a history of the validation performance.
@@ -665,8 +662,8 @@ def train(d):
 	lrSchedCb      = LearningRateScheduler(schedule)
 	testErrCb      = TestErrorCallback((X_test, Y_test))
 	saveLastCb     = SaveLastModel(d.workdir, period=10)
-	saveBestCb     = SaveBestModel(d.workdir)
-	trainValHistCb = TrainValHistory()
+	#saveBestCb     = SaveBestModel(d.workdir)
+	#trainValHistCb = TrainValHistory()
 	
 	callbacks  = []
 	callbacks += [newLineCb]
@@ -674,8 +671,8 @@ def train(d):
 		callbacks += [lrSchedCb]
 	callbacks += [testErrCb]
 	callbacks += [saveLastCb]
-	callbacks += [saveBestCb]
-	callbacks += [trainValHistCb]
+	#callbacks += [saveBestCb]
+	#callbacks += [trainValHistCb]
 	
 	#
 	# Create training data generator

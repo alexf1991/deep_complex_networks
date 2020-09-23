@@ -150,11 +150,11 @@ class Train(Subcommand):
 	@classmethod
 	def run(cls, d):
 		if not os.path.isdir(d.workdir):
-			os.mkdir(d.workdir)
+			os.makedirs(d.workdir)
 		
 		logDir = os.path.join(d.workdir, "logs")
 		if not os.path.isdir(logDir):
-			os.mkdir(logDir)
+			os.makedirs(logDir)
 		
 		logFormatter      =   MsgFormatter ("[%(asctime)s ~~ %(levelname)-8s] %(message)s")
 		
