@@ -5,7 +5,7 @@
 # Authors: Olexa Bilaniuk
 #
 # What this module includes by default:
-import complexnn.bn, complexnn.conv, complexnn.dense, complexnn.fft, complexnn.init, complexnn.norm, complexnn.pool
+import complexnn.bn, complexnn.conv, complexnn.dense, complexnn.fft, complexnn.init, complexnn.norm, complexnn.pool, complexnn.utils
 
 from   .bn    import ComplexBatchNormalization as ComplexBN
 from   .conv  import (ComplexConv,
@@ -20,4 +20,4 @@ from   .init  import (ComplexIndependentFilters, IndependentFilters,
 from   .norm  import LayerNormalization, ComplexLayerNorm
 from   .pool  import SpectralPooling1D, SpectralPooling2D
 from   .utils import (get_realpart, get_imagpart, getpart_output_shape,
-                      GetImag, GetReal, GetAbs)
+                      GetImag, GetReal, GetAbs,Spline)

@@ -6,10 +6,14 @@
 
 import tensorflow.keras.backend as K
 from tensorflow.keras.layers import Layer, Lambda
+import tensorflow as tf
+import numpy as np
 
 #
 # GetReal/GetImag Lambda layer Implementation
 #
+
+
 
 
 def get_realpart(x):
@@ -86,3 +90,145 @@ class GetAbs(Layer):
     def compute_output_shape(self, input_shape):
         return getpart_output_shape(input_shape)
 
+class Spline(Layer):
+    def __init__(self, lamb=0.0, K=1):
+        self.lamb = lamb
+        self.K = K
+        super(Spline, self).__init__()
+
+    def build(self, input_shape):
+        self.n_activations = self.add_weight(name = 'n_activations',shape=[1],trainable=False)
+        self.n_activations.assign([tf.cast(tf.reduce_prod(input_shape[1:]),tf.float32)])
+
+        self.a_param = self.add_weight(name='a_param',
+                                           shape=[1] + [self.K] + [1] * (len(input_shape) - 1),# + [1],
+                                           initializer=tf.keras.initializers.Ones,
+                                           regularizer=None,#tf.keras.regularizers.l2(self.lamb),
+                                           dtype = tf.float32,
+                                           trainable=True,
+                                           aggregation=tf.VariableAggregation.MEAN)
+        
+        self.b_param = self.add_weight(name='b_param',
+                                    shape=[1] + [self.K] + [1] * (len(input_shape) - 1),# + [1],
+                                    initializer=tf.keras.initializers.Ones,
+                                    regularizer=None,#tf.keras.regularizers.l2(self.lamb),
+                                    dtype = tf.float32,
+                                    trainable=True,
+                                    aggregation=tf.VariableAggregation.MEAN)
+        
+        self.k_param = self.add_weight(name='k_param',
+                                    shape=[1] + [self.K] + [1] * (len(input_shape) - 2)+[input_shape[-1]//2] + [2],
+                                    initializer=tf.keras.initializers.Ones,
+                                    regularizer=None,#tf.keras.regularizers.l1(self.lamb),
+                                    dtype = tf.float32,
+                                    trainable=True,
+                                    aggregation=tf.VariableAggregation.MEAN)
+        
+        init_shp = list(self.k_param.shape)
+        init_shp[-1] = 1
+        
+        initialization = tf.concat([tf.random.normal(init_shp,mean=1.0,stddev=0.2),
+                                    tf.random.normal(init_shp,mean=1.0,stddev=0.2)],axis=-1)
+        self.k_param.assign(initialization)
+        
+        self.omega_param = self.add_weight(name='omega_param',
+                                    shape=[1] + [self.K] + [1] * (len(input_shape) - 2)+[input_shape[-1]//2],
+                                    initializer=tf.keras.initializers.Zeros,
+                                    regularizer=None,#tf.keras.regularizers.l1(self.lamb),
+                                    dtype = tf.float32,
+                                    trainable=True,
+                                    aggregation=tf.VariableAggregation.MEAN)
+        
+        self.omega_param.assign(tf.random.uniform(self.omega_param.shape,minval=0.001,maxval=2*np.pi))
+
+        self.mult_param = self.add_weight(name='mult_param',
+                                    shape=[1] + [self.K] + [1] * (len(input_shape) - 1),# + [1],
+                                    initializer=tf.keras.initializers.Ones,
+                                    regularizer=None,#tf.keras.regularizers.l1(self.lamb),
+                                    dtype = tf.float32,
+                                    trainable=False,
+                                    aggregation=tf.VariableAggregation.MEAN)
+
+        init_shp = self.a_param.shape
+        self.a_param.assign(tf.random.normal(init_shp,mean=1.0,stddev=0.2))
+        self.b_param.assign(tf.random.normal(init_shp,mean=1.0,stddev=0.2))
+        
+        initialization_mult = tf.range(1,self.K+1,1,dtype=tf.float32)*0.1
+        initialization_mult = tf.reshape(initialization_mult,init_shp)
+        
+        self.mult_param.assign(initialization_mult)
+        
+        self.affine_params = self.add_weight(name='affine_params',
+                                             shape=[1] * len(input_shape)+[2],
+                                             initializer=tf.keras.initializers.Zeros,
+                                             regularizer=None,#tf.keras.regularizers.l2(self.lamb),
+                                             trainable=True,
+                                             dtype = tf.float32,
+                                             aggregation=tf.VariableAggregation.MEAN)
+
+        init_shp =  [1] * (len(input_shape)+1)
+        initialization = tf.concat([tf.zeros(init_shp) ,
+        #                            tf.zeros(init_shp),
+        #                            tf.zeros(init_shp),
+                                    tf.zeros(init_shp)], axis=-1)
+        self.affine_params.assign(initialization)
+        self.dropout = tf.keras.layers.Dropout(0.0)
+        self.tile_shp = [1] + [self.K] + [1] * (len(input_shape) - 1)
+        self.tile_shp_k = [1] + [self.K] + [1] * (len(input_shape))
+        self.zero = self.add_weight(name='zero',shape=[1] * len(input_shape),trainable=False)
+        self.zero.assign(tf.zeros([1] * len(input_shape), dtype=tf.float32))
+        self.i = tf.complex(tf.constant(0.0),tf.constant(1.0))
+        self.one = self.add_weight(name='one',shape=[1] * len(input_shape),trainable=False)
+        self.one.assign(tf.ones([1] * len(input_shape), dtype=tf.float32))
+
+    def apply_relus(self, inputs,training=False):
+        inputs_tiled = tf.tile(tf.expand_dims(inputs, 1), self.tile_shp)
+        
+        a_param = self.a_param
+        b_param = self.b_param
+        k_param = self.k_param#tf.tile(self.k_param,self.tile_shp_k)
+        omega_param = self.omega_param
+        
+        A_tmp = tf.math.sqrt(a_param**2+b_param**2)
+        #norm = tf.reduce_sum(a_param,axis=1,keepdims=True)+1e-8
+        #a_param = a_param/norm
+        #norm = tf.reduce_sum(b_param,axis=1,keepdims=True)+1e-8
+        #b_param = b_param/norm
+        #a_param = a_param/(tf.sqrt(2.0)*norm)#tf.where(tf.abs(a_param)<1e-6,tf.ones_like(a_param)*1e-6,a_param)
+        
+        if training:
+            a_param = a_param*tf.random.normal(a_param.shape,mean=1.0,stddev=0.1)
+            b_param = b_param*tf.random.normal(b_param.shape,mean=1.0,stddev=0.1)
+            k_param = k_param*tf.random.normal(k_param.shape,mean=1.0,stddev=0.1)
+        
+        
+        input_real = inputs_tiled[...,:inputs_tiled.shape[-1]//2]
+        input_imag = inputs_tiled[...,inputs_tiled.shape[-1]//2:]
+        
+        if training:
+            t = tf.random.normal(omega_param.shape,mean=1.0,stddev=0.2)
+        else:
+            t = tf.ones_like(omega_param)
+        
+        
+        real = k_param[...,0]*input_real-k_param[...,1]*input_imag-omega_param*t 
+        imag = k_param[...,0]*input_imag+k_param[...,1]*input_real
+        phi = tf.math.atan2(imag,real)
+        x = tf.complex(a_param,b_param)*tf.complex(tf.nn.relu(input_real),tf.nn.relu(input_imag))*tf.exp(tf.complex(tf.zeros_like(phi),phi))
+        
+        x_real = tf.math.real(x)
+        x_imag = tf.math.imag(x)
+        x_real = tf.reduce_sum(x_real, axis=1)
+        x_imag = tf.reduce_sum(x_imag,axis=1)
+
+        x = tf.concat([x_real,x_imag],axis=-1)
+        
+        x += inputs*self.affine_params[...,0]
+        x += self.affine_params[...,1]
+        
+        return x
+
+    def call(self, inputs,training=False):
+        x = self.apply_relus(inputs,training)
+
+        return x

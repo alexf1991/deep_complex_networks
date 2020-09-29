@@ -11,7 +11,8 @@ from   complexnn                             import ComplexBN,\
                                                     ComplexDense,\
                                                     FFT,IFFT,FFT2,IFFT2,\
                                                     SpectralPooling1D,SpectralPooling2D
-from complexnn import GetImag, GetReal
+from complexnn import GetImag, GetReal,Spline
+ 
 import h5py                                  as     H
 import tensorflow.keras
 from   tensorflow.keras.callbacks                       import Callback, ModelCheckpoint, LearningRateScheduler
@@ -47,7 +48,7 @@ def learnConcatRealImagBlock(I, filter_size, featmaps, stage, block, convArgs, b
 	bn_name_base   = 'bn' +str(stage)+block+'_branch'
 
 	O = BatchNormalization(name=bn_name_base+'2a', **bnArgs)(I)
-	O = Activation(d.act)(O)
+	O = Spline()(tf.concat([O,tf.zeros_like(O)],axis=-1))#Activation(d.act)(O)
 	O = Convolution2D(featmaps[0], filter_size,
 	                  name               = conv_name_base+'2a',
 	                  padding            = 'same',
@@ -56,7 +57,7 @@ def learnConcatRealImagBlock(I, filter_size, featmaps, stage, block, convArgs, b
 	                  kernel_regularizer = l2(0.0001))(O)
 	
 	O = BatchNormalization(name=bn_name_base+'2b', **bnArgs)(O)
-	O = Activation(d.act)(O)
+	O = Spline()(O)#Activation(d.act)(O)
 	O = Convolution2D(featmaps[1], filter_size,
 	                  name               = conv_name_base+'2b',
 	                  padding            = 'same',
@@ -84,7 +85,7 @@ def getResidualBlock(I, filter_size, featmaps, stage, block, shortcut, convArgs,
 		O = BatchNormalization(name=bn_name_base+'_2a', **bnArgs)(I)
 	elif d.model == "complex":
 		O = ComplexBN(name=bn_name_base+'_2a', **bnArgs)(I)
-	O = Activation(activation)(O)
+	O = Spline()(O)#Activation(activation)(O)
 	
 	if shortcut == 'regular' or d.spectral_pool_scheme == "nodownsample":
 		if   d.model == "real":
@@ -100,11 +101,11 @@ def getResidualBlock(I, filter_size, featmaps, stage, block, shortcut, convArgs,
 			O = ComplexConv2D(nb_fmaps1, filter_size, name=conv_name_base+'2a', strides=(2, 2), **convArgs)(O)
 	if   d.model == "real":
 		O = BatchNormalization(name=bn_name_base+'_2b', **bnArgs)(O)
-		O = Activation(activation)(O)
+		O = Spline()(O)#Activation(activation)(O)
 		O = Conv2D(nb_fmaps2, filter_size, name=conv_name_base+'2b', **convArgs)(O)
 	elif d.model == "complex":
 		O = ComplexBN(name=bn_name_base+'_2b', **bnArgs)(O)
-		O = Activation(activation)(O)
+		O = Spline()(O)#Activation(activation)(O)
 		O = ComplexConv2D(nb_fmaps2, filter_size, name=conv_name_base+'2b', **convArgs)(O)
 	
 	if   shortcut == 'regular':
@@ -194,7 +195,7 @@ def getResnetModel(d):
 	else:
 		O = ComplexConv2D(sf, filsize, name='conv1', **convArgs)(O)
 		O = ComplexBN(name="bn_conv1_2a", **bnArgs)(O)
-	O = Activation(activation)(O)
+	O = Spline()(O)#Activation(activation)(O)
 	
 	#
 	# Stage 2
@@ -634,8 +635,8 @@ def train(d):
 	# Precompile several backend functions
 	#
 	
-	if d.summary:
-		model.summary()
+	#if d.summary:
+	model.summary()
 	L.getLogger("entry").info("# of Parameters:              {:10d}".format(model.count_params()))
 	L.getLogger("entry").info("Compiling Train   Function...")
 	t =- time.time()
@@ -661,7 +662,7 @@ def train(d):
 	newLineCb      = PrintNewlineAfterEpochCallback()
 	lrSchedCb      = LearningRateScheduler(schedule)
 	testErrCb      = TestErrorCallback((X_test, Y_test))
-	saveLastCb     = SaveLastModel(d.workdir, period=10)
+	#saveLastCb     = SaveLastModel(d.workdir, period=10)
 	#saveBestCb     = SaveBestModel(d.workdir)
 	#trainValHistCb = TrainValHistory()
 	
@@ -670,7 +671,7 @@ def train(d):
 	if d.schedule == "default":
 		callbacks += [lrSchedCb]
 	callbacks += [testErrCb]
-	callbacks += [saveLastCb]
+	#callbacks += [saveLastCb]
 	#callbacks += [saveBestCb]
 	#callbacks += [trainValHistCb]
 	
