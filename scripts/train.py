@@ -61,8 +61,8 @@ def data_generator(data,batch_size,is_training,is_validation=False,take_n=None,s
 
 def learning_rate_fn(epoch):
 
-    if epoch >= 0 and epoch <10:
-        return 0.1
+    if epoch >= 0 and epoch <5:
+        return 0.01
     elif epoch >=100 and epoch <120:
         return 0.1
     elif epoch >=120 and epoch < 150:

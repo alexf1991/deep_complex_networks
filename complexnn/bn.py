@@ -69,10 +69,10 @@ def complex_standardization(input_centred, Vrr, Vii, Vri,
     # http://mathworld.wolfram.com/MatrixInverse.html
     # Thus giving us
     #           [  Vii+s  -Vri   ]
-    # (1/s)(1/t)[ -Vir     Vrr+s ]
+    # (1/delta)(1/t)[ -Vir     Vrr+s ]
     # So we proceed as follows:
 
-    inverse_st = 1.0 / (s * t)
+    inverse_st = 1.0 / (delta * t)
     Wrr = (Vii + s) * inverse_st
     Wii = (Vrr + s) * inverse_st
     Wri = -Vri * inverse_st

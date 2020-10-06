@@ -11,7 +11,7 @@ from   complexnn                             import ComplexBN,\
                                                     ComplexDense,\
                                                     FFT,IFFT,FFT2,IFFT2,\
                                                     SpectralPooling1D,SpectralPooling2D
-from complexnn import GetImag, GetReal,Spline
+from complexnn import GetImag, GetReal,Spline,CReLU,CRot
  
 import h5py                                  as     H
 import tensorflow.keras
@@ -85,8 +85,8 @@ def getResidualBlock(I, filter_size, featmaps, stage, block, shortcut, convArgs,
 		O = BatchNormalization(name=bn_name_base+'_2a', **bnArgs)(I)
 	elif d.model == "complex":
 		O = ComplexBN(name=bn_name_base+'_2a', **bnArgs)(I)
-	O = Spline()(O)#Activation(activation)(O)
-	
+	O = CRot()(O)#Activation(activation)(O)
+
 	if shortcut == 'regular' or d.spectral_pool_scheme == "nodownsample":
 		if   d.model == "real":
 			O = Conv2D(nb_fmaps1, filter_size, name=conv_name_base+'2a', **convArgs)(O)
@@ -101,13 +101,13 @@ def getResidualBlock(I, filter_size, featmaps, stage, block, shortcut, convArgs,
 			O = ComplexConv2D(nb_fmaps1, filter_size, name=conv_name_base+'2a', strides=(2, 2), **convArgs)(O)
 	if   d.model == "real":
 		O = BatchNormalization(name=bn_name_base+'_2b', **bnArgs)(O)
-		O = Spline()(O)#Activation(activation)(O)
+		O = CRot()(O)#Activation(activation)(O)
 		O = Conv2D(nb_fmaps2, filter_size, name=conv_name_base+'2b', **convArgs)(O)
 	elif d.model == "complex":
 		O = ComplexBN(name=bn_name_base+'_2b', **bnArgs)(O)
-		O = Spline()(O)#Activation(activation)(O)
+		O = CRot()(O)#Activation(activation)(O)
 		O = ComplexConv2D(nb_fmaps2, filter_size, name=conv_name_base+'2b', **convArgs)(O)
-	
+
 	if   shortcut == 'regular':
 		O = Add()([O, I])
 	elif shortcut == 'projection':
@@ -130,12 +130,12 @@ def getResidualBlock(I, filter_size, featmaps, stage, block, shortcut, convArgs,
 			O_real = Concatenate(channel_axis)([X[...,:X.shape[-1]//2],O[...,:O.shape[-1]//2]])
 			O_imag = Concatenate(channel_axis)([X[...,X.shape[-1]//2:],O[...,O.shape[-1]//2:]])
 			O      = Concatenate(channel_axis)([O_real,     O_imag])
-			
+
 	return O
 
 def applySpectralPooling(x, d):
 	"""Perform spectral pooling on input."""
-	
+
 	if d.spectral_pool_gamma > 0 and d.spectral_pool_scheme != "none":
 		x = FFT2 ()(x)
 		x = SpectralPooling2D(gamma=(d.spectral_pool_gamma,
@@ -167,27 +167,27 @@ def getResnetModel(d):
 		"momentum":                 0.9,
 		"epsilon":                  1e-04
 	}
-	
+
 	if   d.model == "real":
 		sf *= 2
 		convArgs.update({"kernel_initializer": Orthogonal(float(np.sqrt(2)))})
 	elif d.model == "complex":
 		convArgs.update({"spectral_parametrization": d.spectral_param,
 						 "kernel_initializer": d.comp_init})
-	
+
 
 	#
 	# Input Layer
 	#
 
 	I = tf.keras.Input(shape=inputShape)
-	
+
 	#
 	# Stage 1
 	#
-	
+
 	O = learnConcatRealImagBlock(I, (1, 1), (3, 3), 0, '0', convArgs, bnArgs, d)
-	
+
 	O = Concatenate(channelAxis)([I, O])
 	if d.model == "real":
 		O = Conv2D(sf, filsize, name='conv1', **convArgs)(O)
@@ -195,7 +195,7 @@ def getResnetModel(d):
 	else:
 		O = ComplexConv2D(sf, filsize, name='conv1', **convArgs)(O)
 		O = ComplexBN(name="bn_conv1_2a", **bnArgs)(O)
-	O = Spline()(O)#Activation(activation)(O)
+	O = CRot()(O)#Activation(activation)(O)
 	
 	#
 	# Stage 2
