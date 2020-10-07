@@ -245,7 +245,7 @@ class ComplexInit(Initializer):
     # The standard complex initialization using
     # either the He or the Glorot criterion.
     def __init__(self, kernel_size, input_dim,
-                 weight_dim, nb_filters=None,
+                 weight_dim, nb_filters=None,is_dense=False,
                  criterion='glorot', seed=None):
 
         # `weight_dim` is used as a parameter for sanity check
@@ -265,6 +265,7 @@ class ComplexInit(Initializer):
         self.input_dim = input_dim
         self.weight_dim = weight_dim
         self.criterion = criterion
+        self.is_dense = is_dense
         self.seed = 1337 if seed is None else seed
 
     def __call__(self, shape, dtype=None):
@@ -290,8 +291,10 @@ class ComplexInit(Initializer):
         weight_real = modulus * np.cos(phase)
         weight_imag = modulus * np.sin(phase)
         weight = np.concatenate([weight_real, weight_imag], axis=-1)
-
-        return weight
+        if self.is_dense:
+            return np.squeeze(weight)
+        else:
+            return weight
 
 
 class SqrtInit(Initializer):

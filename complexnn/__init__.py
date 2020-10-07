@@ -8,6 +8,7 @@
 import complexnn.bn, complexnn.conv, complexnn.dense, complexnn.fft, complexnn.init, complexnn.norm, complexnn.pool, complexnn.utils
 
 from   .bn    import ComplexBatchNormalization as ComplexBN
+from   .bn    import ComplexFilterResponseNormalization as ComplexFRN
 from   .conv  import (ComplexConv,
                       ComplexConv1D,
                       ComplexConv2D,

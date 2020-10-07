@@ -10,7 +10,11 @@ import sys; sys.path.append('.')
 from tensorflow.keras import backend as K
 from tensorflow.keras import activations, initializers, regularizers, constraints
 from tensorflow.keras.layers import Layer, InputSpec
+from .init import ComplexInit, ComplexIndependentFilters
+from .bn import ComplexBN as complex_normalization
+from .bn import sqrt_init
 import numpy as np
+import tensorflow as tf
 
 
 class ComplexDense(Layer):
@@ -78,10 +82,7 @@ class ComplexDense(Layer):
         self.activation = activations.get(activation)
         self.use_bias = use_bias
         self.init_criterion = init_criterion
-        if kernel_initializer in {'complex'}:
-            self.kernel_initializer = kernel_initializer
-        else:
-            self.kernel_initializer = initializers.get(kernel_initializer)
+        self.kernel_initializer = kernel_initializer
         self.bias_initializer = initializers.get(bias_initializer)
         self.kernel_regularizer = regularizers.get(kernel_regularizer)
         self.bias_regularizer = regularizers.get(bias_regularizer)
@@ -100,16 +101,15 @@ class ComplexDense(Layer):
         assert input_shape[-1] % 2 == 0
         input_dim = input_shape[-1] // 2
         data_format = K.image_data_format()
-        kernel_shape = (input_dim, self.units)
-        fan_in, fan_out = initializers._compute_fans(
-            kernel_shape,
-            data_format=data_format
-        )
-        if self.init_criterion == 'he':
-            s = K.sqrt(1. / fan_in)
-        elif self.init_criterion == 'glorot':
-            s = K.sqrt(1. / (fan_in + fan_out))
-        rng = RandomStreams(seed=self.seed)
+        kernel_shape = [input_dim, 2*self.units]
+
+        fan_in = tf.cast(kernel_shape[-2],tf.float32)
+        fan_out = tf.cast(kernel_shape[-1],tf.float32)
+        #if self.init_criterion == 'he':
+        #    s = tf.sqrt(1. / fan_in)
+        #elif self.init_criterion == 'glorot':
+        #    s = tf.sqrt(1. / (fan_in + fan_out))
+        #rng = RandomStreams(seed=self.seed)
 
         # Equivalent initialization using amplitude phase representation:
         """modulus = rng.rayleigh(scale=s, size=kernel_shape)
@@ -120,42 +120,42 @@ class ComplexDense(Layer):
             return modulus * K.sin(phase)"""
 
         # Initialization using euclidean representation:
-        def init_w_real(shape, dtype=None):
-            return rng.normal(
-                size=kernel_shape,
-                avg=0,
-                std=s,
-                dtype=dtype
+        #def init_w_real(shape, dtype=None):
+            #return rng.normal(
+                #size=kernel_shape,
+                #avg=0,
+                #std=s,
+                #dtype=dtype
+            #)
+        #def init_w_imag(shape, dtype=None):
+            #return rng.normal(
+                #size=kernel_shape,
+                #avg=0,
+                #std=s,
+                #dtype=dtype
+            #)
+        if self.kernel_initializer in {'complex', 'complex_independent'}:
+            kls = {'complex':             ComplexInit,
+                   'complex_independent': ComplexIndependentFilters}[self.kernel_initializer]
+            kern_init = kls(
+                kernel_size=[1,1],
+                input_dim=input_dim,
+                weight_dim=2,
+                nb_filters=self.units,
+                criterion=self.init_criterion,
+                is_dense=True
             )
-        def init_w_imag(shape, dtype=None):
-            return rng.normal(
-                size=kernel_shape,
-                avg=0,
-                std=s,
-                dtype=dtype
-            )
-        if self.kernel_initializer in {'complex'}:
-            real_init = init_w_real
-            imag_init = init_w_imag
         else:
-            real_init = self.kernel_initializer
-            imag_init = self.kernel_initializer
+            kern_init = self.kernel_initializer
 
-        self.real_kernel = self.add_weight(
+        self.kernel = self.add_weight(
             shape=kernel_shape,
-            initializer=real_init,
-            name='real_kernel',
+            initializer=kern_init,
+            name='kernel',
             regularizer=self.kernel_regularizer,
             constraint=self.kernel_constraint
         )
-        self.imag_kernel = self.add_weight(
-            shape=kernel_shape,
-            initializer=imag_init,
-            name='imag_kernel',
-            regularizer=self.kernel_regularizer,
-            constraint=self.kernel_constraint
-        )
-        
+
         if self.use_bias:
             self.bias = self.add_weight(
                 shape=(2 * self.units,),
@@ -175,13 +175,14 @@ class ComplexDense(Layer):
         input_dim = input_shape[-1] // 2
         real_input = inputs[:, :input_dim]
         imag_input = inputs[:, input_dim:]
-        
+        real_kernel = self.kernel[:,:input_dim]
+        imag_kernel = self.kernel[:,input_dim:]
         cat_kernels_4_real = K.concatenate(
-            [self.real_kernel, -self.imag_kernel],
+            [real_kernel, -imag_kernel],
             axis=-1
         )
         cat_kernels_4_imag = K.concatenate(
-            [self.imag_kernel, self.real_kernel],
+            [imag_kernel, real_kernel],
             axis=-1
         )
         cat_kernels_4_complex = K.concatenate(
