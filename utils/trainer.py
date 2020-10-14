@@ -226,7 +226,7 @@ class ModelEnvironment():
             if trainable:
                 all_vars += model.trainable_variables
 
-        with tf.GradientTape() as tape_hessian:
+        with tf.GradientTape(persistent=True) as tape_hessian:
             tape_hessian.watch(x)
             with tf.GradientTape() as tape:
                 tape.watch(x)

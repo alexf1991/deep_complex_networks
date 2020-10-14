@@ -85,7 +85,7 @@ def getResidualBlock(I, filter_size, featmaps, stage, block, shortcut, convArgs,
 		O = BatchNormalization(name=bn_name_base+'_2a', **bnArgs)(I)
 	elif d.model == "complex":
 		O = ComplexBN(name=bn_name_base+'_2a', **bnArgs)(I)
-		O = CRot()(O)  # Activation(activation)(O)
+		O = CReLU()(O)  # Activation(activation)(O)
 
 	#Activation(activation)(O)
 
@@ -103,11 +103,11 @@ def getResidualBlock(I, filter_size, featmaps, stage, block, shortcut, convArgs,
 			O = ComplexConv2D(nb_fmaps1, filter_size, name=conv_name_base+'2a', strides=(2, 2), **convArgs)(O)
 	if   d.model == "real":
 		O = BatchNormalization(name=bn_name_base+'_2b', **bnArgs)(O)
-		O = CRot()(O)#Activation(activation)(O)
+		O = CReLU()(O)#Activation(activation)(O)
 		O = Conv2D(nb_fmaps2, filter_size, name=conv_name_base+'2b', **convArgs)(O)
 	elif d.model == "complex":
 		O = ComplexBN(name=bn_name_base + '_2b', **bnArgs)(O)
-		O = CRot()(O)  # Activation(activation)(O)
+		O = CReLU()(O)  # Activation(activation)(O)
 		O = ComplexConv2D(nb_fmaps2, filter_size, name=conv_name_base+'2b', **convArgs)(O)
 
 	if   shortcut == 'regular':
@@ -210,7 +210,7 @@ def getResnetModel(d):
 		O = BatchNormalization(name="bn_conv1_2a", **bnArgs)(O)
 	else:
 		O = ComplexBN(name="bn_conv1_2a", **bnArgs)(O)
-		#O = CRot()(O)
+		#O = CReLU()(O)
 		O = ComplexConv2D(sf, filsize, name='conv1', **convArgs)(O)
 
 #Activation(activation)(O)

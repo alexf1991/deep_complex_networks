@@ -108,7 +108,7 @@ flags.DEFINE_float('spectral_pool_gamma', 0.5, '')
 flags.DEFINE_boolean('load_model', False, 'Bool indicating if the model should be loaded')
 flags.DEFINE_integer('eval_every_n_th_epoch', 1, 'Integer discribing after how many epochs the test and validation set are evaluted')
 
-
+@tf.function
 def get_largest_eigv_hessian(grad, var):
     grad_shp = tf.shape(grad)
     grad = tf.reshape(grad, [-1])
@@ -120,8 +120,10 @@ def get_largest_eigv_hessian(grad, var):
         Hv = tf.reshape(Hv, [-1])
         v_last = v
         v = Hv / tf.norm(Hv)
-    return tf.norm(Hv)
-
+    lambda_max = tf.norm(Hv)
+    grad_hessian = tf.gradients(lambda_max,var)
+    grad += grad_hessian
+    return grad
 
 def main(argv):
     
