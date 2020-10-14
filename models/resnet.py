@@ -11,7 +11,7 @@ from   complexnn                             import ComplexBN,\
                                                     ComplexDense,\
                                                     FFT,IFFT,FFT2,IFFT2,\
                                                     SpectralPooling1D,SpectralPooling2D,ComplexFRN
-from complexnn import GetImag, GetReal,Spline,CReLU,CRot
+from complexnn import GetImag, GetReal,Spline,CReLU,CRot,DenseHess
  
 import h5py                                  as     H
 import tensorflow.keras
@@ -47,14 +47,14 @@ def learnConcatRealImagBlock(I, filter_size, featmaps, stage, block, convArgs, b
 	conv_name_base = 'res'+str(stage)+block+'_branch'
 	bn_name_base   = 'bn' +str(stage)+block+'_branch'
 
-	O = BatchNormalization(name=bn_name_base+'2a', **bnArgs)(I)
-	O = Activation(d.act)(O)
+	#O = BatchNormalization(name=bn_name_base+'2a', **bnArgs)(I)
+	#O = Activation(d.act)(O)
 	O = Convolution2D(featmaps[0], filter_size,
 	                  name               = conv_name_base+'2a',
 	                  padding            = 'same',
 	                  kernel_initializer = 'he_normal',
 	                  use_bias           = False,
-	                  kernel_regularizer = l2(0.0001))(O)
+	                  kernel_regularizer = l2(0.0001))(I)
 	
 	O = BatchNormalization(name=bn_name_base+'2b', **bnArgs)(O)
 	O = Activation(d.act)(O)
@@ -84,9 +84,10 @@ def getResidualBlock(I, filter_size, featmaps, stage, block, shortcut, convArgs,
 	if   d.model == "real":
 		O = BatchNormalization(name=bn_name_base+'_2a', **bnArgs)(I)
 	elif d.model == "complex":
-		I = ComplexBN(name=bn_name_base+'_2a', **bnArgs)(I)
-		O = I
-	O = CReLU()(O)#Activation(activation)(O)
+		O = ComplexBN(name=bn_name_base+'_2a', **bnArgs)(I)
+		O = CRot()(O)  # Activation(activation)(O)
+
+	#Activation(activation)(O)
 
 	if shortcut == 'regular' or d.spectral_pool_scheme == "nodownsample":
 		if   d.model == "real":
@@ -102,16 +103,15 @@ def getResidualBlock(I, filter_size, featmaps, stage, block, shortcut, convArgs,
 			O = ComplexConv2D(nb_fmaps1, filter_size, name=conv_name_base+'2a', strides=(2, 2), **convArgs)(O)
 	if   d.model == "real":
 		O = BatchNormalization(name=bn_name_base+'_2b', **bnArgs)(O)
-		O = CReLU()(O)#Activation(activation)(O)
+		O = CRot()(O)#Activation(activation)(O)
 		O = Conv2D(nb_fmaps2, filter_size, name=conv_name_base+'2b', **convArgs)(O)
 	elif d.model == "complex":
-		O = ComplexBN(name=bn_name_base+'_2b', **bnArgs)(O)
-		O = CReLU()(O)#Activation(activation)(O)
+		O = ComplexBN(name=bn_name_base + '_2b', **bnArgs)(O)
+		O = CRot()(O)  # Activation(activation)(O)
 		O = ComplexConv2D(nb_fmaps2, filter_size, name=conv_name_base+'2b', **convArgs)(O)
 
 	if   shortcut == 'regular':
 		O = Add()([O, I])
-		O = ComplexBN(name=bn_name_base+'_sc', **bnArgs)(O)
 	elif shortcut == 'projection':
 		if d.spectral_pool_scheme == "proj":
 			I = applySpectralPooling(I, d)
@@ -129,8 +129,8 @@ def getResidualBlock(I, filter_size, featmaps, stage, block, shortcut, convArgs,
 			                            (1, 1),
 			                  **convArgs)(I)
 
-			O_real = Concatenate(channel_axis)([X[...,:X.shape[-1]//2],O[...,:O.shape[-1]//2]])
-			O_imag = Concatenate(channel_axis)([X[...,X.shape[-1]//2:],O[...,O.shape[-1]//2:]])
+			O_real = Concatenate(channel_axis)([X[...,:X.shape[-1]//2],O[...,:O.shape[-1]//2]])#Add()([X[...,:X.shape[-1]//2],O[...,:O.shape[-1]//2]])
+			O_imag = Concatenate(channel_axis)([X[...,X.shape[-1]//2:],O[...,O.shape[-1]//2:]])#Add()([X[...,X.shape[-1]//2:],O[...,O.shape[-1]//2:]])
 			O      = Concatenate(channel_axis)([O_real,     O_imag])
 
 	return O
@@ -144,6 +144,20 @@ def applySpectralPooling(x, d):
 		                             d.spectral_pool_gamma))(x)
 		x = IFFT2()(x)
 	return x
+
+def complex_max_pooling(x):
+    x_real = x[...,:x.shape[-1]//2]
+    x_imag = x[...,x.shape[-1]//2:]
+    abs_val = tf.sqrt(x_real**2+x_imag**2)
+    x_mask = tf.where(abs_val==tf.reduce_max(abs_val,axis=[1,2],keepdims=True),tf.ones_like(abs_val),tf.zeros_like(abs_val))
+    shp = x.shape
+    tile_shp = [1]*len(shp)+[2]
+    x_mask = tf.tile(tf.expand_dims(x_mask,axis=-1),tile_shp)
+    x_last = tf.stack([x_real,x_imag],axis=-1)
+    x_max = x_last*x_mask
+    x_max = tf.reduce_sum(x_max,axis=[1,2],keepdims=True)
+    return tf.concat([x_max[...,0],x_max[...,1]],axis=-1)
+
 
 #
 # Get ResNet Model
@@ -195,9 +209,11 @@ def getResnetModel(d):
 		O = Conv2D(sf, filsize, name='conv1', **convArgs)(O)
 		O = BatchNormalization(name="bn_conv1_2a", **bnArgs)(O)
 	else:
-		O = ComplexConv2D(sf, filsize, name='conv1', **convArgs)(O)
 		O = ComplexBN(name="bn_conv1_2a", **bnArgs)(O)
-	O = CReLU()(O)#Activation(activation)(O)
+		#O = CRot()(O)
+		O = ComplexConv2D(sf, filsize, name='conv1', **convArgs)(O)
+
+#Activation(activation)(O)
 	
 	#
 	# Stage 2
@@ -242,11 +258,11 @@ def getResnetModel(d):
 		O = AveragePooling2D(pool_size=(32, 32))(O)
 	else:
 
-		O = AveragePooling2D(pool_size=(8,  8))(O)
+		O = AveragePooling2D(pool_size=(8,  8))(O)#complex_max_pooling(O)
 	#
 	# Flatten
 	#
-	O = ComplexBN(name="output_bn", **bnArgs)(O)
+	#O = ComplexBN(name="output_bn", **bnArgs)(O)
 	O = Flatten()(O)
 	
 	#
@@ -254,9 +270,9 @@ def getResnetModel(d):
 	#
 	
 	if   dataset == 'cifar10':
-		O = ComplexDense(10,  activation=None, kernel_regularizer=l2(0.0001))(O)
-		O = tf.abs(tf.complex(O[...,:O.shape[-1]//2],O[...,O.shape[-1]//2:]))#O = tf.where(O[...,:O.shape[-1]//2]>0,tf.math.atan(O[...,O.shape[-1]//2:]/O[...,:O.shape[-1]//2]),tf.zeros_like(O[...,:O.shape[-1]//2]))
-
+		#O = ComplexDense(10,  activation=None, kernel_regularizer=l2(0.0001))(O)
+		#O = tf.abs(tf.complex(O[...,:O.shape[-1]//2],O[...,O.shape[-1]//2:]))#O = tf.where(O[...,:O.shape[-1]//2]>0,tf.math.atan(O[...,O.shape[-1]//2:]/O[...,:O.shape[-1]//2]),tf.zeros_like(O[...,:O.shape[-1]//2]))
+		O = Dense(10, activation=None, kernel_regularizer=l2(0.0001))(O)
 	elif dataset == 'cifar100':
 		O = Dense(100, activation=None, kernel_regularizer=l2(0.0001))(O)
 	elif dataset == 'svhn':

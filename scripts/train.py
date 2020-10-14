@@ -23,9 +23,18 @@ NUM_IMAGES = {
     'test': 10000,
 }
 
+def random_shift(image):
+    return tf.keras.preprocessing.image.random_shift(image, 0.125, 0.125)
 
 def preprocess_image(image):
     """Preprocess a single image of layout [height, width, depth]."""
+
+    image = tf.image.random_flip_left_right(image)
+    tf.print(tf.shape(image))
+    images_list = tf.unstack(image)
+    type_list = [tf.float32]*len(images_list)
+    image_processed = tf.py_function(random_shift,images_list,type_list)
+    image = tf.stack(image_processed,axis=0)
     return image
 
 
@@ -47,13 +56,15 @@ def data_generator(data,batch_size,is_training,is_validation=False,take_n=None,s
     if is_training:
 
         dataset = dataset.shuffle(shuffle_buffer)
+        dataset = dataset.batch(1000)
         dataset = dataset.map(lambda img, lbl: (preprocess_image(img), lbl))
         dataset = dataset.map(lambda img, lbl: (img, tf.one_hot(lbl,NUM_CLASSES)))
+        dataset = dataset.unbatch()
         dataset = dataset.batch(batch_size,drop_remainder=True)
         dataset = dataset.prefetch(tf.data.experimental.AUTOTUNE)
     else:
-        dataset = dataset.map(lambda img, lbl: (preprocess_image(img), lbl))
-        dataset = dataset.map(lambda img, lbl: (img, tf.one_hot(lbl,NUM_CLASSES)))
+        #dataset = dataset.map(lambda img, lbl: (preprocess_image(img), lbl))
+        #dataset = dataset.map(lambda img, lbl: (img, tf.one_hot(lbl,NUM_CLASSES)))
         dataset = dataset.batch(100)
         dataset = dataset.prefetch(tf.data.experimental.AUTOTUNE)
 
@@ -61,9 +72,9 @@ def data_generator(data,batch_size,is_training,is_validation=False,take_n=None,s
 
 def learning_rate_fn(epoch):
 
-    if epoch >= 0 and epoch <10:
-        return 0.1
-    elif epoch >=100 and epoch <120:
+    #if epoch >= 0 and epoch <10:
+    #    return 0.1
+    if epoch >=100 and epoch <120:
         return 0.1
     elif epoch >=120 and epoch < 150:
         return 0.01
@@ -91,11 +102,25 @@ flags.DEFINE_string('aact','crelu', 'Advanced activation')
 flags.DEFINE_string('model','complex', 'Model type')
 flags.DEFINE_string('spectral_pool_scheme','none', 'Model type')
 flags.DEFINE_string('spectral_param','store_true', 'Spectral parametrization')
-flags.DEFINE_string('comp_init','complex_independent', 'Complex initialization')
+flags.DEFINE_string('comp_init','complex', 'Complex initialization')
 flags.DEFINE_float('spectral_pool_gamma', 0.5, '')
 
 flags.DEFINE_boolean('load_model', False, 'Bool indicating if the model should be loaded')
 flags.DEFINE_integer('eval_every_n_th_epoch', 1, 'Integer discribing after how many epochs the test and validation set are evaluted')
+
+
+def get_largest_eigv_hessian(grad, var):
+    grad_shp = tf.shape(grad)
+    grad = tf.reshape(grad, [-1])
+    v = tf.random.normal(grad.shape)
+    v = v / tf.norm(v, keepdims=True)
+    for i in range(3):
+        gv = tf.reduce_sum(grad * v, axis=-1)
+        Hv = tf.gradients(gv, var)
+        Hv = tf.reshape(Hv, [-1])
+        v_last = v
+        v = Hv / tf.norm(Hv)
+    return tf.norm(Hv)
 
 
 def main(argv):
@@ -145,7 +170,9 @@ def main(argv):
     
 
     (X_train, y_train), (X_test, y_test) = tf.keras.datasets.cifar10.load_data()
-    
+    y_train = tf.keras.utils.to_categorical(y_train, num_classes=NUM_CLASSES, dtype='float32')
+    y_test = tf.keras.utils.to_categorical(y_test, num_classes=NUM_CLASSES, dtype='float32')
+
     X_train    = X_train.astype('float32')/255.0
     X_test     = X_test.astype('float32')/255.0
     X_train_split = X_train[NUM_IMAGES['train']]
@@ -156,12 +183,21 @@ def main(argv):
     X_test     = X_test.astype(np.float32) - pixel_mean
     
     #Train data generator
-    train_ds = data_generator((X_train,y_train),batch_size,is_training=True,take_n=NUM_IMAGES["train"])
+    #train_ds = data_generator((X_train,y_train),batch_size,is_training=True,take_n=NUM_IMAGES["train"])
     steps_train = NUM_IMAGES["train"]//batch_size
+    steps_val = NUM_IMAGES["validation"]//batch_size
     #Validation data generator
-    val_ds = data_generator((X_train,y_train),100,is_training=False,is_validation = True,skip_n=NUM_IMAGES["train"],take_n=NUM_IMAGES["validation"])
+    #val_ds = data_generator((X_train,y_train),100,is_training=False,is_validation = True,skip_n=NUM_IMAGES["train"],take_n=NUM_IMAGES["validation"])
     #Test data generator
     test_ds = data_generator((X_test,y_test),100,is_training=False)
+    datagen = tf.keras.preprocessing.image.ImageDataGenerator(height_shift_range=0.125,
+                                 width_shift_range=0.125,
+                                 validation_split = float(NUM_IMAGES["validation"])/float(NUM_IMAGES["train"]),
+                                 horizontal_flip=True)
+    train_ds = datagen.flow(X_train, y_train, batch_size=batch_size,subset="training")
+
+    val_ds = datagen.flow(X_train, y_train, batch_size=batch_size, subset="validation")
+
     #Create summaries to log
     scalar_summary_names = ["total_loss",
                             "class_loss",
@@ -196,8 +232,10 @@ def main(argv):
                                summaries=summaries,
                                eval_every_n_th_epoch = 1,
                                num_train_batches=steps_train,
+                               num_val_batches=steps_val,
                                load_model=load_model,
                                save_dir = model_save_dir,
+                               #gradient_processesing_fn = get_largest_eigv_hessian,
                                input_keys=[0],
                                label_keys=[1],
                                start_epoch=start_epoch)

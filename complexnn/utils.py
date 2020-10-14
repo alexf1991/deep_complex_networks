@@ -100,9 +100,9 @@ def sign(x):
         return dy
     return y, grad
 
-class CRot(tf.keras.layers.Layer):
+class CSP(tf.keras.layers.Layer):
     def __init__(self):
-        super(CRot, self).__init__()
+        super(CSP, self).__init__()
 
     def build(self, input_shape):
         self.act = tf.keras.layers.Activation("relu")
@@ -126,16 +126,76 @@ class CRot(tf.keras.layers.Layer):
         input_imag = inputs[...,inputs.shape[-1] // 2:]#self.act(inputs[...,inputs.shape[-1] // 2:])
         norm = tf.maximum(tf.sqrt(input_real**2+input_imag**2),1e-8)
         norm_k = tf.sqrt(self.affine_params[...,0]**2+self.affine_params[...,1]**2)
+        k_real = self.affine_params[...,0]/norm_k
+        k_imag = self.affine_params[...,1]/norm_k
         input_complex = tf.complex(input_real,input_imag)
         k_complex = tf.complex(self.affine_params[...,0]/norm_k,self.affine_params[...,1]/norm_k)
-        #fact = tf.reduce_sum(input_complex*k_complex,axis=-1,keepdims=True)
-        #fact = self.affine_params[...,0]*input_real+self.affine_params[...,1]*input_imag
+        #fact = input_real/norm*k_real+input_imag/norm*k_imag
         fact = input_complex*k_complex
         #tf.print(tf.math.real(fact))
-        out_real = self.act(tf.math.real(fact))#input_real - (tf.math.real(fact))
-        out_imag = self.act(tf.math.imag(fact))#input_imag - (tf.math.imag(fact))
+        out_real = input_real+self.act(tf.math.real(fact))#self.act(input_real-self.act(tf.math.real(fact)))#input_real - (tf.math.real(fact))
+        out_imag = input_imag+self.act(tf.math.imag(fact))#self.act(input_imag-self.act(tf.math.real(fact)))#input_imag - (tf.math.imag(fact))
+        #out_real = norm*fact*k_real
+        #out_imag = norm*fact*k_imag
 
         return tf.concat([out_real,out_imag],axis=-1)
+
+class CRot(tf.keras.layers.Layer):
+    def __init__(self):
+        super(CRot, self).__init__()
+
+    def build(self, input_shape):
+        self.act = tf.keras.layers.Activation("relu")
+        self.affine_params = self.add_weight(name='affine_params',
+                                             shape=[1] * (len(input_shape)-1)+[input_shape[-1]//2] + [2],
+                                             initializer=tf.keras.initializers.Zeros,
+                                             regularizer=None,
+                                             trainable=True,
+                                             dtype=tf.float32,
+                                             aggregation=tf.VariableAggregation.MEAN)
+        shp = [1] * len(input_shape)
+        self.one_i = tf.complex(tf.ones(shp)/tf.sqrt(2.0),tf.ones(shp)/tf.sqrt(2.0))
+        init_shp = [1] * (len(input_shape)-1)+[input_shape[-1]//2]+[1]
+        initialization = tf.concat([tf.random.normal(init_shp),
+                                    tf.random.normal(init_shp)], axis=-1)
+        self.affine_params.assign(initialization)
+
+    def call(self,inputs,training=False):
+
+        input_real = self.act(inputs[...,:inputs.shape[-1]//2])
+        input_imag = self.act(inputs[...,inputs.shape[-1] // 2:])
+        norm = tf.maximum(tf.sqrt(input_real**2+input_imag**2),1e-8)
+        k_real = 1#self.affine_params[...,0]
+        k_imag = norm#*self.affine_params[...,1]
+        norm_k = tf.sqrt(k_real**2+k_imag**2)
+        k_real = k_real/norm_k
+        k_imag = k_imag/norm_k
+        input_complex = tf.complex(input_real,input_imag)
+        k_complex = tf.complex(k_real,k_imag)
+        #fact = input_real/norm*k_real+input_imag/norm*k_imag
+        fact = input_complex*k_complex
+        #tf.print(tf.math.real(fact))
+        out_real = tf.math.real(fact)#self.act(input_real-self.act(tf.math.real(fact)))#input_real - (tf.math.real(fact))
+        out_imag = tf.math.imag(fact)#self.act(input_imag-self.act(tf.math.real(fact)))#input_imag - (tf.math.imag(fact))
+        #out_real = norm*fact*k_real
+        #out_imag = norm*fact*k_imag
+
+        return tf.concat([out_real,out_imag],axis=-1)
+
+class DenseHess(tf.keras.layers.Layer):
+    def __init__(self,units):
+        self.units = units
+        super(DenseHess, self).__init__()
+
+    def build(self, input_shape):
+        self.dense = tf.keras.layers.Dense(self.units)
+
+    def call(self,inputs,training=False):
+
+        y = self.dense(inputs)
+        H = tf.hessians(y,inputs)
+        self.add_loss(tf.reduce_sum(H**2))
+        return y
 
 class Spline(Layer):
     def __init__(self, lamb=0.0, K=1):

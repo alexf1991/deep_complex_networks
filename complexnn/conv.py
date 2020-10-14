@@ -133,7 +133,7 @@ class ComplexConv(Layer):
                  bias_constraint=None,
                  gamma_diag_constraint=None,
                  gamma_off_constraint=None,
-                 init_criterion='he',
+                 init_criterion='glorot',
                  seed=None,
                  spectral_parametrization=False,
                  epsilon=1e-7,
@@ -269,7 +269,7 @@ class ComplexConv(Layer):
         elif self.rank == 3:
             f_real   = self.kernel[:, :, :, :, :self.filters]
             f_imag   = self.kernel[:, :, :, :, self.filters:]
-
+        #self.add_loss(1e-2*tf.reduce_sum((f_real-f_imag)**2))
         if self.data_format == "channels_last":
             self.data_format = "NHWC"
         elif self.data_format == "channels_first":
@@ -524,7 +524,7 @@ class ComplexConv1D(ComplexConv):
                  kernel_constraint=None,
                  bias_constraint=None,
                  seed=None,
-                 init_criterion='he',
+                 init_criterion='glorot',
                  spectral_parametrization=False,
                  **kwargs):
         super(ComplexConv1D, self).__init__(
@@ -659,7 +659,7 @@ class ComplexConv2D(ComplexConv):
                  kernel_constraint=None,
                  bias_constraint=None,
                  seed=None,
-                 init_criterion='he',
+                 init_criterion='glorot',
                  spectral_parametrization=False,
                  **kwargs):
         super(ComplexConv2D, self).__init__(
@@ -795,7 +795,7 @@ class ComplexConv3D(ComplexConv):
                  kernel_constraint=None,
                  bias_constraint=None,
                  seed=None,
-                 init_criterion='he',
+                 init_criterion='glorot',
                  spectral_parametrization=False,
                  **kwargs):
         super(ComplexConv3D, self).__init__(

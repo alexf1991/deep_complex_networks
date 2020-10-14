@@ -4,9 +4,10 @@ import glob
 import numpy as np
 from time import time
 import tensorflow as tf
+from tensorflow.python.ops import array_ops
+from tensorflow.python.ops import math_ops
 
-        
-def clip_by_value_10(grad):
+def clip_by_value_10(grad,var):
     grad = tf.where(tf.math.is_finite(grad), grad, tf.zeros_like(grad))
     return tf.clip_by_value(grad, -10, 10)
 
@@ -29,6 +30,7 @@ class ModelEnvironment():
                  post_train_step_args = {},
                  eval_every_n_th_epoch = 1,
                  num_train_batches = None,
+                 num_val_batches = None,
                  load_model = False,
                  input_keys = ["input_features","false_sample"],
                  label_keys = ["labels"],
@@ -87,6 +89,15 @@ class ModelEnvironment():
                 self.max_number_batches = 0
         else:
             self.max_number_batches = num_train_batches
+
+        #Get number of validation batches
+        if num_val_batches == None:
+            try:
+                self.max_number_val_batches = tf.data.experimental.cardinality(validation_data_generator).numpy()
+            except:
+                self.max_number_val_batches = 0
+        else:
+            self.max_number_val_batches = num_val_batches
 
     def initialize_models(self,init_data):
         if len(init_data) == 1:
@@ -206,30 +217,33 @@ class ModelEnvironment():
     def post_train_step(self):
         return self.eval_fns.post_train_step(self.post_train_step_args)
 
+
     @tf.function
     def compute_gradients(self, x, y):
         # Pass through network
-        with tf.GradientTape() as tape:
-            losses,outputs = self.compute_loss(
-                x, y, training=True)
-
         all_vars = []
         for model,trainable in zip(self.models,self.models_trainable):
             if trainable:
                 all_vars += model.trainable_variables
-        
-        gradients = tape.gradient(losses['total_loss'],all_vars)
 
-        if self.gradient_processing_fn != None:
-            out_grads = []
-            for grad in gradients:
-                if grad != None:
-                    grad = self.gradient_processing_fn(grad)
-                    out_grads.append(grad)
-                else:
-                    out_grads.append(None)
-        else:
-            out_grads = gradients
+        with tf.GradientTape() as tape_hessian:
+            tape_hessian.watch(x)
+            with tf.GradientTape() as tape:
+                tape.watch(x)
+                losses,outputs = self.compute_loss(
+                    x, y, training=True)
+            gradients = tape.gradient(losses['total_loss'], all_vars)
+
+            if self.gradient_processing_fn != None:
+                out_grads = []
+                for grad,var in zip(gradients,all_vars):
+                    if grad != None:
+                        grad = self.gradient_processing_fn(grad,var)
+                        out_grads.append(grad)
+                    else:
+                        out_grads.append(None)
+            else:
+                out_grads = gradients
 
         return out_grads,losses,outputs
 
@@ -378,6 +392,7 @@ class ModelEnvironment():
             
             
             if self.validation_data_generator != None and (epoch % self.eval_every_n_th_epoch == 0 or epoch == self.epochs-1):
+                batch = 0
                 for validation_xy in self.validation_data_generator:
                     validation_x = self.get_data_for_keys(validation_xy,self.input_keys)
                     validation_y = self.get_data_for_keys(validation_xy,self.label_keys)
@@ -388,7 +403,9 @@ class ModelEnvironment():
 
                     # Update summaries
                     self.update_summaries(losses,outputs,validation_y,"val")
-                        
+                    batch+=1
+                    if batch >= self.max_number_val_batches:
+                        break
                 # Write validation summaries
                 self.write_summaries(epoch+1,"val")
             
